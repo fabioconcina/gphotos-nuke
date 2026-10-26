@@ -109,9 +109,6 @@ All at the top of [`nuke.js`](./nuke.js):
 | `STEP_TIMEOUT_MS` | `5000` | Give-up threshold waiting for UI state changes. Raise on very slow networks. |
 | `SETTLE_MS` | `150` | Post-confirm yield before the next cycle starts. |
 | `STALL_LIMIT` | `5` | Halt after this many cycles in a row where the top-of-grid tile hasn't changed. Catches the case where Google is temporarily rate-limiting deletions so you don't loop forever thinking you're making progress. Adapted from [JuliusBairaktaris/Google-Photos-Deletion-Script](https://github.com/JuliusBairaktaris/Google-Photos-Deletion-Script). |
-| `POLL_MS` | `100` | How often waits re-check the page. |
-| `EMPTY_RETRIES` | `3` | How many `STEP_TIMEOUT_MS` waits with no tiles before deciding the library is empty. |
-| `RANGE_CHECK_MS` | `1000` | On the first cycle, how long to wait for the shift-click range select to take effect before falling back to per-tile clicks. |
 | `BATCH_SIZE` | `100` | Max tiles per cycle in per-tile mode. Range-select mode isn't capped. |
 | `CLICK_GAP_MS` | `25` | Pause between clicks in per-tile mode. Raise it if you see `only N/M tiles selected`. |
 | `CLEAR_TIMEOUT_MS` | `30000` | After confirming, how long to wait for the selection to clear before stopping. Raise it for big batches. |
@@ -147,10 +144,10 @@ Check you zoomed out all the way (step 2 of Quick start) - this is the biggest l
 
 ## How it works
 
-The script is ~180 lines of vanilla JS, no dependencies. Rough flow per cycle:
+The script is ~290 lines of vanilla JS, no dependencies. Rough flow per cycle:
 
 1. Query `[role="checkbox"]` inside the `[role="main"]` landmark that contains the photo grid.
-2. Click the first checkbox; shift-click the last. Google's grid treats this as a range-select and checks everything in between - O(1) clicks regardless of batch size. Some browsers (seen in Firefox) ignore the synthetic shift-click; the first cycle detects that and the script falls back to clicking each tile.
+2. Click the first checkbox; shift-click the last. Google's grid treats this as a range-select and checks everything in between - O(1) clicks regardless of batch size. Some browsers (seen in Firefox) ignore the synthetic shift-click; after two misses in a row the script falls back to clicking each tile.
 3. Wait for the toolbar delete button (`div[data-delete-origin] button`) to appear.
 4. Click it. Wait for the `[role="dialog"]` confirm modal.
 5. Click the last text-bearing button in that dialog (Google's Material convention places the destructive action last, which keeps the script locale-independent).

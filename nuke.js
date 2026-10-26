@@ -3,11 +3,12 @@
   const DRY_RUN = false;
   const BLOCK_IMAGES = true;
   const STEP_TIMEOUT_MS = 5000;
-  const POLL_MS = 100;
+  const POLL_MS = 25;
   const SETTLE_MS = 150;
   const STALL_LIMIT = 5;
   const EMPTY_RETRIES = 3;
   const RANGE_CHECK_MS = 1000;
+  const RANGE_MISS_LIMIT = 2;
   const BATCH_SIZE = 100;
   const CLICK_GAP_MS = 25;
   const CLEAR_TIMEOUT_MS = 30000;
@@ -72,7 +73,6 @@
           result = null;
         }
         if (result) return resolve(result);
-        if (window.__stopDelete) return reject(new Error('stopped'));
         if (performance.now() - started > timeout) return reject(new Error('waitFor timeout'));
         setTimeout(tick, POLL_MS);
       };
@@ -124,11 +124,22 @@
   // Fallback for browsers where the synthetic shift-click is ignored (seen in Firefox)
   const selectTiles = async (tiles) => {
     for (const el of tiles) {
-      if (window.__stopDelete) throw new Error('stopped');
       if (!el.isConnected || el.getAttribute('aria-checked') === 'true') continue;
       el.click();
       await sleep(CLICK_GAP_MS);
     }
+  };
+
+  // Range selects can land over a few frames; read the count once it stops changing
+  const settledCount = async () => {
+    let prev;
+    let n = countSelected();
+    do {
+      prev = n;
+      await sleep(POLL_MS);
+      n = countSelected();
+    } while (n !== prev);
+    return n;
   };
 
   const waitForTiles = async () => {
@@ -156,6 +167,7 @@
   let stallCount = 0;
   let lastFirstLabel = null;
   let rangeSelectWorks = null;
+  let rangeMisses = 0;
 
   console.log('[gphotos-nuke] starting. Set window.__stopDelete = true to abort.');
 
@@ -199,29 +211,33 @@
     lastFirstLabel = firstLabel;
 
     try {
-      const tryRange = rangeSelectWorks !== false && batch.length >= 5;
-      if (tryRange) {
+      let rangeLanded = false;
+      if (rangeSelectWorks !== false && batch.length >= 5) {
         rangeSelect(batch[0], batch[batch.length - 1]);
+        rangeLanded = await waitFor(
+          () => countSelected() >= batch.length / 2,
+          RANGE_CHECK_MS,
+        ).then(
+          () => true,
+          () => false,
+        );
+        // Only give up on range select after repeated misses, so one slow cycle doesn't decide the run
         if (rangeSelectWorks === null) {
-          rangeSelectWorks = await waitFor(
-            () => countSelected() >= batch.length / 2,
-            RANGE_CHECK_MS,
-          ).then(
-            () => true,
-            () => false,
-          );
-          if (!rangeSelectWorks) {
+          if (rangeLanded) {
+            rangeSelectWorks = true;
+          } else if (++rangeMisses >= RANGE_MISS_LIMIT) {
+            rangeSelectWorks = false;
             console.log('[gphotos-nuke] range select ignored by this browser - clicking tiles one by one');
           }
         }
       }
-      if (!tryRange || !rangeSelectWorks) await selectTiles(batch);
+      if (!rangeLanded) await selectTiles(batch);
 
       // The delete button stays in the DOM after a move, so also require a live selection
       const deleteBtn = await waitFor(
         () => countSelected() > 0 && document.querySelector(DELETE_BTN_SELECTOR),
       );
-      const selected = countSelected();
+      const selected = rangeLanded ? await settledCount() : countSelected();
       if (selected < batch.length) {
         console.warn(`[cycle #${cycle}] only ${selected}/${batch.length} tiles selected`);
       }
@@ -245,8 +261,7 @@
       // The move to Trash is async; wait for the selection to clear so the next cycle doesn't re-submit it
       try {
         await waitFor(() => countSelected() === 0, CLEAR_TIMEOUT_MS);
-      } catch (e) {
-        if (window.__stopDelete) throw e;
+      } catch {
         console.warn(
           `[gphotos-nuke] selection still present ${CLEAR_TIMEOUT_MS / 1000}s after confirming - stopping rather than re-submitting. Reload the page and rerun.`,
         );
