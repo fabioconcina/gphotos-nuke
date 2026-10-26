@@ -2,7 +2,7 @@
 
 A single-file JavaScript snippet that wipes your Google Photos library by automating the web UI. Paste it into your browser's console, walk away, come back to an empty library.
 
-**Around 400/min on a laptop, 1500/min on a 4K display, unattended.** 24,128 photos deleted in 15 minutes on 4K in testing. A 50,000-photo library clears in 2-4 hours on a laptop, ~35 minutes on 4K. See [Performance](#performance) for measured numbers.
+**Hundreds of photos per minute, unattended.** Throughput scales with how many tiles fit on screen. See [Performance](#performance) for measured numbers.
 
 No install, no extension, no OAuth, no external tool. Works in Chrome, Safari, Firefox, and Edge. Works in any UI language.
 
@@ -48,7 +48,9 @@ In 2026, automating the web UI is the only working approach for "delete my entir
    const MAX_DELETE_COUNT = Infinity;
    const DRY_RUN = false;
    ```
-   Paste the full file again, press Enter. Watch the `[cycle #N] selected K tiles (total M) - confirmed in Tms` logs.
+   Paste the full file again, press Enter. Watch the `[cycle #N] selected K tiles (total M) in Tms, R tiles/s` logs. In Safari and Firefox you'll also see `range select ignored by this browser - clicking tiles one by one` after the second cycle; that's expected (see [How it works](#how-it-works)).
+
+   **Keep the browser window visible while it runs.** Google Photos doesn't render the grid while the window is hidden or fully covered, so the script has nothing to select.
 6. **Abort mid-run** at any time by typing this into the console and pressing Enter:
    ```js
    window.__stopDelete = true;
@@ -59,7 +61,22 @@ In 2026, automating the web UI is the only working approach for "delete my entir
 
 ## Performance
 
-Screen size is the single biggest factor: more tiles per viewport means fewer cycles, which means higher throughput. Two reference runs, both with `BLOCK_IMAGES = true`:
+Screen size is the single biggest factor: more tiles per viewport means fewer cycles, which means higher throughput.
+
+As of October 2026, Safari and Firefox ignore the script's synthetic shift-click, so the script selects tiles one by one there (see [How it works](#how-it-works)). Per-tile runs so far, `BLOCK_IMAGES = true`:
+
+**2560px-wide window, Safari, per-tile (October 2026):**
+
+```
+[gphotos-nuke] done. deleted=109 cycles=5 elapsed=17.6s avg=6.2 tiles/s (372/min)
+[gphotos-nuke] done. deleted=37  cycles=1 elapsed=3.8s  avg=9.8 tiles/s (590/min)
+```
+
+Both are short test runs. The first lost about 5s to a timeout on its first cycle, and its fastest cycles ran at 12-13 tiles/s (about 750/min). Per-tile mode hasn't been measured on long runs or on a laptop display yet.
+
+### Range-select reference runs
+
+These runs used range select, measured before Safari stopped honoring the synthetic shift-click. All with `BLOCK_IMAGES = true`:
 
 **MacBook Air (1440x900), Safari:**
 
@@ -79,7 +96,7 @@ The 4K run averaged **79 tiles per cycle** vs. ~14 on the MacBook Air - 3.5x the
 
 The MBA's 144/min short run dipped for reasons that weren't obvious (possibly a transient server slowdown or a burst of videos, which take longer per item than photos).
 
-Plan for roughly **300-450/min on a laptop display, 1200-1600/min on 4K/5K**. Extrapolated wall-time windows:
+With range select, plan for roughly **300-450/min on a laptop display, 1200-1600/min on 4K/5K**. Extrapolated wall-time windows:
 
 | Library size | Laptop (400/min) | 4K display (1500/min) |
 | ---: | --- | --- |
@@ -88,7 +105,9 @@ Plan for roughly **300-450/min on a laptop display, 1200-1600/min on 4K/5K**. Ex
 | 50,000 photos | ~2 h | ~35 min |
 | 100,000 photos | ~4 h | ~70 min |
 
-Throughput depends on four things, in roughly descending order of impact:
+### What affects throughput
+
+Four things, in roughly descending order of impact:
 
 1. **Zoom level.** More tiles per batch equals fewer cycles equals more photos per second. Zoom out all the way (step 2 of Quick start).
 2. **`BLOCK_IMAGES`.** Thumbnails being rendered add real CPU load and make the grid slow to reflow between cycles.
@@ -103,7 +122,7 @@ All at the top of [`nuke.js`](./nuke.js):
 
 | Constant | Default | What it does |
 | --- | --- | --- |
-| `MAX_DELETE_COUNT` | `Infinity` | Stop after N items. Set to a small number for a test run. |
+| `MAX_DELETE_COUNT` | `Infinity` | Stop after roughly N items. Set to a small number for a test run. The last cycle can overshoot by a few (seen: 109 for a limit of 100). |
 | `DRY_RUN` | `false` | Select + log but skip the actual delete. Safe way to verify the script. |
 | `BLOCK_IMAGES` | `true` | Monkey-patches `HTMLImageElement` so thumbnails are replaced with a 1×1 transparent GIF before the network request happens. Massive speedup, especially on Safari (which has no DevTools "Block URL" feature). Turn off if the grid layout collapses weirdly. |
 | `STEP_TIMEOUT_MS` | `5000` | Give-up threshold waiting for UI state changes. Raise on very slow networks. |
@@ -128,6 +147,12 @@ document.querySelectorAll('[role="main"]').forEach((m, i) =>
 
 If neither `main` contains checkboxes, the tile anchor has moved - open an issue with the output and I'll update the selector.
 
+**Progress stops, or "library appears empty" while photos remain.**
+Check the browser window is visible. Google Photos doesn't render the grid while the window is hidden or fully covered, so there are no tiles to select. Bring the window back, reload, and rerun.
+
+**"range select ignored by this browser - clicking tiles one by one".**
+Expected in Safari and Firefox as of October 2026: Google ignores the script's synthetic shift-click there, so the script clicks each tile instead. Nothing to fix.
+
 **"waitFor timeout" after the first delete.**
 The confirm dialog's button layout has changed. The current strategy is "last text-bearing button in the last `[role="dialog"]`". If Google added extra buttons to the dialog, this heuristic may miss. Inspect the dialog in DevTools and open an issue.
 
@@ -147,7 +172,7 @@ Check you zoomed out all the way (step 2 of Quick start) - this is the biggest l
 The script is ~290 lines of vanilla JS, no dependencies. Rough flow per cycle:
 
 1. Query `[role="checkbox"]` inside the `[role="main"]` landmark that contains the photo grid.
-2. Click the first checkbox; shift-click the last. Google's grid treats this as a range-select and checks everything in between - O(1) clicks regardless of batch size. Some browsers (seen in Firefox) ignore the synthetic shift-click; after two misses in a row the script falls back to clicking each tile.
+2. Click the first checkbox; shift-click the last. Google's grid treats this as a range-select and checks everything in between - O(1) clicks regardless of batch size. As of October 2026, Safari and Firefox ignore the synthetic shift-click; after two misses in a row the script falls back to clicking each tile.
 3. Wait for the toolbar delete button (`div[data-delete-origin] button`) to appear.
 4. Click it. Wait for the `[role="dialog"]` confirm modal.
 5. Click the last text-bearing button in that dialog (Google's Material convention places the destructive action last, which keeps the script locale-independent).
@@ -174,10 +199,10 @@ This isn't a new idea - several projects solve the same problem in different sha
 ### What's specifically different about this one
 
 - **Single file, no install.** Copy, paste, run. No extension permissions prompt, no userscript manager, no npm.
-- **Shift-click range selection.** Per-cycle click count is O(1) regardless of batch size - select first tile, shift-click last, done. Most of the scripts above click each tile individually (this one only falls back to that when the browser ignores the shift-click).
+- **Range selection where the browser allows it.** Select the first tile, shift-click the last: O(1) clicks per cycle regardless of batch size. As of October 2026 Safari and Firefox ignore the synthetic shift-click, so there the script detects it and clicks each tile, like most of the scripts above.
 - **Locale-agnostic selectors.** Targets ARIA roles (`[role="checkbox"]`, `[role="dialog"]`, `[role="main"]`) and structural positions (last text-bearing button in the confirm dialog). No English-only string matching, no brittle generated class names like `.ckGgle` that Google churns.
 - **Event-driven waits.** Every step uses short-interval polled predicates instead of fixed sleeps, so each cycle finishes the moment the UI actually transitions.
-- **Works in Safari at full speed.** The `BLOCK_IMAGES` option monkey-patches image loading in-page, so you get the Chrome-DevTools-"Block request URL" speedup in any browser.
+- **Image blocking in any browser.** The `BLOCK_IMAGES` option monkey-patches image loading in-page, so you get the Chrome-DevTools-"Block request URL" speedup in any browser.
 - **Dry-run mode.** Verify the script matches the current Google Photos DOM before trusting it with your library.
 - **Stall detection.** Halts cleanly if Google rate-limits deletions, so you don't loop forever with no progress. Idea adapted from JuliusBairaktaris/Google-Photos-Deletion-Script above.
 
