@@ -63,7 +63,7 @@ In 2026, automating the web UI is the only working approach for "delete my entir
 
 Screen size is the single biggest factor: more tiles per viewport means fewer cycles, which means higher throughput.
 
-As of October 2026, Safari and Firefox ignore the script's synthetic shift-click, so the script selects tiles one by one there (see [How it works](#how-it-works)). Per-tile runs so far, `BLOCK_IMAGES = true`:
+As of October 2026, Google Photos ignores the script's synthetic shift-click in Safari and Firefox, so the script selects tiles one by one there (see [How it works](#how-it-works)). Per-tile runs so far, `BLOCK_IMAGES = true`:
 
 **2560px-wide window, Safari, per-tile (October 2026):**
 
@@ -76,7 +76,7 @@ Both are short test runs. The first lost about 5s to a timeout on its first cycl
 
 ### Range-select reference runs
 
-These runs used range select, measured before Safari stopped honoring the synthetic shift-click. All with `BLOCK_IMAGES = true`:
+These runs used range select, measured in April 2026, before Google Photos stopped accepting the synthetic shift-click in Safari. All with `BLOCK_IMAGES = true`:
 
 **MacBook Air (1440x900), Safari:**
 
@@ -172,7 +172,7 @@ Check you zoomed out all the way (step 2 of Quick start) - this is the biggest l
 The script is ~290 lines of vanilla JS, no dependencies. Rough flow per cycle:
 
 1. Query `[role="checkbox"]` inside the `[role="main"]` landmark that contains the photo grid.
-2. Click the first checkbox; shift-click the last. Google's grid treats this as a range-select and checks everything in between - O(1) clicks regardless of batch size. As of October 2026, Safari and Firefox ignore the synthetic shift-click; after two misses in a row the script falls back to clicking each tile.
+2. Click the first checkbox; shift-click the last. Google's grid treats this as a range-select and checks everything in between - O(1) clicks regardless of batch size. As of October 2026, Google Photos ignores the synthetic shift-click in Safari and Firefox; after two misses in a row the script falls back to clicking each tile.
 3. Wait for the toolbar delete button (`div[data-delete-origin] button`) to appear.
 4. Click it. Wait for the `[role="dialog"]` confirm modal.
 5. Click the last text-bearing button in that dialog (Google's Material convention places the destructive action last, which keeps the script locale-independent).
@@ -199,7 +199,7 @@ This isn't a new idea - several projects solve the same problem in different sha
 ### What's specifically different about this one
 
 - **Single file, no install.** Copy, paste, run. No extension permissions prompt, no userscript manager, no npm.
-- **Range selection where the browser allows it.** Select the first tile, shift-click the last: O(1) clicks per cycle regardless of batch size. As of October 2026 Safari and Firefox ignore the synthetic shift-click, so there the script detects it and clicks each tile, like most of the scripts above.
+- **Range selection when Google Photos accepts it.** Select the first tile, shift-click the last: O(1) clicks per cycle regardless of batch size. As of October 2026 Google Photos ignores the synthetic shift-click in Safari and Firefox, so there the script detects it and clicks each tile, like most of the scripts above.
 - **Locale-agnostic selectors.** Targets ARIA roles (`[role="checkbox"]`, `[role="dialog"]`, `[role="main"]`) and structural positions (last text-bearing button in the confirm dialog). No English-only string matching, no brittle generated class names like `.ckGgle` that Google churns.
 - **Event-driven waits.** Every step uses short-interval polled predicates instead of fixed sleeps, so each cycle finishes the moment the UI actually transitions.
 - **Image blocking in any browser.** The `BLOCK_IMAGES` option monkey-patches image loading in-page, so you get the Chrome-DevTools-"Block request URL" speedup in any browser.
